@@ -1,37 +1,92 @@
-- hosts: lab-win
+- hosts: linux
   tasks:
-    - name: Disable feature update #1
-      win_regedit:
-        path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate
-        name: DisableOSUpgrade
-        data: 1
-        type: dword
+    - name: setting hostname
+      hostname: 
+         name: "{{ inventory_hostname }}"
+      become: yes
 
-    - name: Disable feature update #2
-      win_regedit:
-        path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\OSUpgrade
-        name: AllowOSUpgrade
-        data: 0
-        type: dword
+    - name: Replace a localhost entry with our own
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.0\.1'
+        line: 127.0.0.1 "{{ inventory_hostname }}"
+        owner: root
+        group: root
+        mode: '0644'
+      become: yes
+    
+    - name: Install default apt packages
+      apt: 
+        name: 
+          - syslog-ng 
+          - vim
+        state: present
+        update_cache: yes
+      become:  yes
+      when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
 
-    - name: Enable Remote Desktop
-      win_regedit:
-        path: HKLM:\System\CurrentControlSet\Control\Terminal Server
-        name: fDenyTSConnections
-        data: 0
-        type: dword
+    - name: Remove packages, autoclean, and autoremove (apt)
+      apt: 
+        name: rsyslog 
+        state: absent
+        purge: yes
+        force: yes
+        update_cache: yes
+        autoclean: yes
+        autoremove: yes
+      become: yes
+      when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
+    
+    - name: Enable EPEL Repository on CentOS 7
+      yum:
+        name: epel-release
+        state: latest
+      become: yes 
+      when: ansible_distribution == 'CentOS' or ansible_distribution == 'Red Hat Enterprise Linux' 
+      
+    - name: Install default yum packages
+      yum: 
+        name: 
+         - syslog-ng
+         - vim
+        state: present
+        update_cache: yes
+      become: yes
+      when: ansible_distribution == 'CentOS' or ansible_distribution == 'Red Hat Enterprise Linux'
 
-    - name: Disable Windows Firewall
-      win_firewall:
-        state: disabled
-        profiles:
-        - Domain
-        - Private
-        - Public
-      tags: disable_firewall
+    - name: Remove rsyslog (yum)
+      yum: 
+        name: rsyslog
+        state: absent
+      become: yes
+      when: ansible_distribution == 'CentOS' or ansible_distribution == 'Red Hat Enterprise Linux'
+   
+    - name: Update syslog-ng (debian/ubunt)
+      blockinfile:
+        path: /etc/syslog-ng/syslog-ng.conf
+        block: |
+          destination remotelog { udp("10.0.1.6" port(514)); };
+          log {source(s_src); destination(remotelog); };
+      become: yes
+      when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
+  
+    - name: Update syslog-ng (centos)
+      blockinfile:
+        path: /etc/syslog-ng/syslog-ng.conf
+        block: |
+          destination remotelog { udp("10.0.1.6" port(514)); };
+          log {source(s_sys); destination(remotelog); };
+      become: yes
+      when: ansible_distribution == 'CentOS' or ansible_distribution == 'Red Hat Enterprise Linux' 
 
-    - name: Disable Hibernation
-      win_command: powercfg.exe -h off
+    - name: Enable and start syslog-ng
+      ansible.builtin.service:
+        name: syslog-ng
+        state: restarted
+        daemon_reload: yes
+        enabled: yes
+      become: yes
+
     
 
 
